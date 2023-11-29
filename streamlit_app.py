@@ -31,7 +31,7 @@ def main():
                 st.markdown(message["content"])
 
                 # Accept user input
-        if prompt := st.chat_input(f"Pre interview chatbot for Sabrina Gomes..."):
+        if prompt := st.chat_input(f"Have a question about Sabrina?"):
             # Add user message to chat history
             st.session_state.messages.append({"role": "user", "content": prompt})
             # Display user message in chat message container
