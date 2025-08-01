@@ -79,13 +79,25 @@ def main():
                 # Iterate over all replies
                 for r in replies:
                     if r.role == "assistant":
-                        message_content = r.content[0].text
+                        message_content = r.content[0].text 
                         annotations = message_content.annotations
+                        # content_value = message_content.value  
+                        # You need this line of script above to get the actual text content, 
+                        # so just remove the hash above, try to run, and if it doesnt work, hash it back out
+                        # so we don't mess up the script. 
 
                         # Iterate over the annotations and add footnotes
                         for index, annotation in enumerate(annotations):
                             # Replace the text with a footnote
-                            message_content.value = message_content.value.replace(
+                            message_content.value = message_content.value.replace( # content_value = content_value.replace( 
+                                # the comment next to aboves script is the one you should use ^^
+                                # its because message_content is an object that comes from OpenAI 
+                                # (like a library book - you can read it but can't change it)
+                                # Imagine message_content like a library book. The library book has information in it (value) 
+                                # but you're not allowed to write in library books!
+                                # so you have to copy the text from the library book (openai)
+                                # to your own notebook (content_value)
+                                # Now you can write and change whatever you want in your notebook
                                 annotation.text, f" [{index}]"
                             )
 
@@ -108,7 +120,9 @@ def main():
                                 )
 
                 # Combine message content and citations
-                full_response = message_content.value + "\n" + "\n".join(citations)
+                full_response = message_content.value + "\n" + "\n".join(citations) # full_response = content_value + "\n" + "\n".join(citations)
+                # again, use the script i added next to yours, and hash yours out next to it just in case so we can go back to that if it doesnt work
+                # so here we are just keeping it consistent with your other values above :)
                 return full_response
 
             # Add the processed response to session state
@@ -123,3 +137,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
