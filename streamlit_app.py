@@ -5,136 +5,95 @@ import streamlit as st
 
 def main():
     st.set_page_config(
-        page_title="OpenAI Assistant with Retrieval",
-        page_icon="📚",
+        page_title="OpenAI Assistant with Image Upload",
+        page_icon="🖼️",
     )
 
     api_key = st.secrets["OPENAI_API_KEY"]
     assistant_id = st.secrets["ASSISTANT_ID"]
-
-    # Initiate st.session_state
     st.session_state.client = OpenAI(api_key=api_key)
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    if "start_chat" not in st.session_state:
-        st.session_state.start_chat = False
+    st.title("Chat with Your Assistant (Image Support)")
 
-    if st.session_state.client:
-       st.session_state.start_chat = True
+    # Upload image file
+    uploaded_file = st.file_uploader("Upload an image", type=["jpg", "png", "jpeg"])
 
-    if st.session_state.start_chat:
-        # Display existing messages in the chat
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+    if uploaded_file is not None:
+        with open(f"/tmp/{uploaded_file.name}", "wb") as f:
+            f.write(uploaded_file.read())
 
-                # Accept user input
-        if prompt := st.chat_input(f"Have a question about your resources?"):
-            # Add user message to chat history
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            # Display user message in chat message container
-            with st.chat_message("user"):
-                st.markdown(prompt)
+        # Upload to OpenAI
+        with st.spinner("Uploading image..."):
+            openai_file = st.session_state.client.files.create(
+                file=open(f"/tmp/{uploaded_file.name}", "rb"),
+                purpose="assistants"
+            )
+            st.success("Image uploaded to OpenAI!")
 
-            # Create a thread
+    if prompt := st.chat_input("Ask something (optionally based on the image)"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Create thread and add message (with file if uploaded)
+        if "thread" not in st.session_state:
             st.session_state.thread = st.session_state.client.beta.threads.create()
 
-            # Add a Message to the thread
-            st.session_state.client.beta.threads.messages.create(
+        if uploaded_file is not None:
+            message = st.session_state.client.beta.threads.messages.create(
                 thread_id=st.session_state.thread.id,
                 role="user",
                 content=prompt,
+                file_ids=[openai_file.id]
             )
-
-            # As of now, assistant and thread are not associated to each other
-            # You need to create a run in order to tell the assistant at which thread to look at
-            run = st.session_state.client.beta.threads.runs.create(
+        else:
+            message = st.session_state.client.beta.threads.messages.create(
                 thread_id=st.session_state.thread.id,
-                assistant_id=assistant_id,
+                role="user",
+                content=prompt
             )
 
-            # with while loop continuously check the status of a run until it neither 'queued' nor 'in progress'
-            def wait_for_complete(run, thread):
-                while run.status == "queued" or run.status == "in_progress":
-                    run = st.session_state.client.beta.threads.runs.retrieve(
-                        thread_id=thread.id,
-                        run_id=run.id,
-                    )
-                    time.sleep(0.5)
-                return run
+        run = st.session_state.client.beta.threads.runs.create(
+            thread_id=st.session_state.thread.id,
+            assistant_id=assistant_id,
+        )
 
-            run = wait_for_complete(run, st.session_state.thread)
+        # Poll for completion
+        def wait_for_complete(run, thread):
+            while run.status in ["queued", "in_progress"]:
+                run = st.session_state.client.beta.threads.runs.retrieve(
+                    thread_id=thread.id, run_id=run.id
+                )
+                time.sleep(1)
+            return run
 
-            # once the run has completed, list the messages in the thread -> they are ordered in reverse chronological order
-            replies = st.session_state.client.beta.threads.messages.list(
-                thread_id=st.session_state.thread.id
-            )
+        run = wait_for_complete(run, st.session_state.thread)
 
-            # This function will parse citations and make them readable
-            def process_replies(replies):
-                citations = []
+        replies = st.session_state.client.beta.threads.messages.list(
+            thread_id=st.session_state.thread.id
+        )
 
-                # Iterate over all replies
-                for r in replies:
-                    if r.role == "assistant":
-                        message_content = r.content[0].text 
-                        annotations = message_content.annotations
-                        # content_value = message_content.value  
-                        # You need this line of script above to get the actual text content, 
-                        # so just remove the hash above, try to run, and if it doesnt work, hash it back out
-                        # so we don't mess up the script. 
+        # Display the assistant's response
+        for reply in reversed(replies.data):
+            if reply.role == "assistant":
+                content = reply.content[0].text.value
+                st.session_state.messages.append({"role": "assistant", "content": content})
+                with st.chat_message("assistant"):
+                    st.markdown(content)
 
-                        # Iterate over the annotations and add footnotes
-                        for index, annotation in enumerate(annotations):
-                            # Replace the text with a footnote
-                            message_content.value = message_content.value.replace( # content_value = content_value.replace( 
-                                # the comment next to aboves script is the one you should use ^^
-                                # its because message_content is an object that comes from OpenAI 
-                                # (like a library book - you can read it but can't change it)
-                                # Imagine message_content like a library book. The library book has information in it (value) 
-                                # but you're not allowed to write in library books!
-                                # so you have to copy the text from the library book (openai)
-                                # to your own notebook (content_value)
-                                # Now you can write and change whatever you want in your notebook
-                                annotation.text, f" [{index}]"
+                    # If assistant included files, render download links
+                    for file_obj in reply.content:
+                        if hasattr(file_obj, "image_file"):
+                            file_id = file_obj.image_file.file_id
+                            file_info = st.session_state.client.files.retrieve(file_id)
+                            download_url = f"https://api.openai.com/v1/files/{file_id}/content"
+                            st.markdown(
+                                f"📎 [Download {file_info.filename}]({download_url})"
                             )
-
-                            # Gather citations based on annotation attributes
-                            if file_citation := getattr(
-                                annotation, "file_citation", None
-                            ):
-                                cited_file = st.session_state.client.files.retrieve(
-                                    file_citation.file_id
-                                )
-                                citations.append(
-                                    f"[{index}] {file_citation.quote} from {cited_file.filename}"
-                                )
-                            elif file_path := getattr(annotation, "file_path", None):
-                                cited_file = st.session_state.client.files.retrieve(
-                                    file_path.file_id
-                                )
-                                citations.append(
-                                    f"[{index}] Click <here> to download {cited_file.filename}"
-                                )
-
-                # Combine message content and citations
-                full_response = message_content.value + "\n" + "\n".join(citations) # full_response = content_value + "\n" + "\n".join(citations)
-                # again, use the script i added next to yours, and hash yours out next to it just in case so we can go back to that if it doesnt work
-                # so here we are just keeping it consistent with your other values above :)
-                return full_response
-
-            # Add the processed response to session state
-            processed_response = process_replies(replies)
-            st.session_state.messages.append(
-                {"role": "assistant", "content": processed_response}
-            )
-            # Display assistant response in chat message container
-            with st.chat_message("assistant"):
-                st.markdown(processed_response, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
     main()
-
